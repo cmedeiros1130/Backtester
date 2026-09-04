@@ -1,0 +1,42 @@
+# Render blueprint for LevelForge.
+#
+# LevelForge is a single long-running Node process that owns a SQLite file and
+# a directory of uploaded screenshots. It therefore needs a host that gives it
+# a real disk that survives restarts and redeploys -- which is what `disk:`
+# below provides.
+#
+# IMPORTANT: persistent disks are not available on Render's free instance type.
+# A disk requires a paid instance (Starter or above). Without one, the database
+# and every screenshot are lost on each deploy, which defeats the point.
+#
+# Railway, Fly.io and any VPS work the same way: build, start, and mount a
+# volume at LEVELFORGE_DATA_DIR. Nothing here is Render-specific except the
+# file format.
+
+services:
+  - type: web
+    name: levelforge
+    runtime: node
+    plan: starter          # required for the disk below; free has no persistence
+    region: oregon
+
+    # One clean install from the repo root (npm workspaces installs both
+    # packages and puts vite on PATH), then one build.
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Everything mutable lives here: levelforge.db plus uploads/.
+      - key: LEVELFORGE_DATA_DIR
+        value: /var/data
+      # Render sets PORT itself; the server reads it. Node version comes from
+      # the .node-version file in the repo root.
+
+    disk:
+      name: levelforge-data
+      mountPath: /var/data
+      sizeGB: 1
