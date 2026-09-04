@@ -15,21 +15,21 @@ router.get('/', (req, res) => {
     counts: {
       days: get('SELECT COUNT(*) AS n FROM trading_session')?.n ?? 0,
       days_reviewed: get("SELECT COUNT(*) AS n FROM trading_session WHERE status = 'REVIEWED'")?.n ?? 0,
-      folders: get('SELECT COUNT(*) AS n FROM level_folder WHERE archived = 0')?.n ?? 0,
-      level_examples: get('SELECT COUNT(*) AS n FROM level_example')?.n ?? 0,
+      levels: get('SELECT COUNT(*) AS n FROM certified_level')?.n ?? 0,
+      key_levels: get("SELECT COUNT(*) AS n FROM certified_level WHERE classification = 'KEY_LEVEL'")?.n ?? 0,
       categories: get('SELECT COUNT(*) AS n FROM example_category WHERE archived = 0')?.n ?? 0,
       market_examples: get('SELECT COUNT(*) AS n FROM market_example')?.n ?? 0,
       screenshots: get('SELECT COUNT(*) AS n FROM screenshot')?.n ?? 0,
     },
 
-    recent_level_examples: all(
-      `SELECT e.id, e.occurred_on, e.instrument, e.timeframe, e.level_price, e.result,
-              e.touch_number, e.drawdown, e.reaction,
-              f.name AS folder_name, f.slug AS folder_slug,
-         (SELECT filename FROM screenshot s WHERE s.entity_type = 'LEVEL_EXAMPLE'
-           AND s.entity_id = e.id ORDER BY s.sort_order LIMIT 1) AS thumb
-       FROM level_example e JOIN level_folder f ON f.id = e.folder_id
-       ORDER BY e.created_at DESC LIMIT 8`
+    recent_levels: all(
+      `SELECT l.id, l.level_price, l.instrument, l.timeframe, l.source, l.direction,
+              l.classification, l.importance, l.first_touch_pct, l.sample_size,
+              l.buy_avg_stop, l.buy_avg_profit, l.sell_avg_stop, l.sell_avg_profit,
+         (SELECT filename FROM screenshot s WHERE s.entity_type = 'CERTIFIED_LEVEL'
+           AND s.entity_id = l.id ORDER BY s.sort_order LIMIT 1) AS thumb
+       FROM certified_level l
+       ORDER BY l.created_at DESC LIMIT 8`
     ),
 
     recent_market_examples: all(
@@ -44,7 +44,7 @@ router.get('/', (req, res) => {
     recent_days: all(
       `SELECT s.id, s.date, s.instrument, s.timeframe, s.title, s.status,
               p.expected_day_type, p.locked_at, r.actual_day_type,
-         (SELECT COUNT(*) FROM level_example e WHERE e.session_id = s.id)  AS level_count,
+         (SELECT COUNT(*) FROM certified_level e WHERE e.session_id = s.id) AS level_count,
          (SELECT COUNT(*) FROM market_example m WHERE m.session_id = s.id) AS example_count,
          (SELECT filename FROM screenshot sc WHERE sc.session_id = s.id
            ORDER BY sc.created_at LIMIT 1) AS thumb

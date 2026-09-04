@@ -45,31 +45,48 @@ export const TIMEFRAMES = [
 
 export const COMMON_INSTRUMENTS = ['NQ', 'ES', 'MNQ', 'MES', 'YM', 'RTY', 'CL', 'GC', 'SPY', 'QQQ'];
 
-// -------------------------------------------------------- level examples ---
-export const DIRECTION = [
-  opt('LONG', 'Long'),
-  opt('SHORT', 'Short'),
-  opt('EITHER', 'Either'),
+// ------------------------------------------------------ certified levels ---
+// How a level has historically been worth trading.
+export const LEVEL_DIRECTION = [
+  opt('BUY', 'Buy'),
+  opt('SELL', 'Sell'),
+  opt('BOTH', 'Both'),
 ];
 
-export const LEVEL_RESULT = [
-  opt('HELD', 'Held'),
-  opt('RECLAIMED', 'Reclaimed'),
-  opt('FAILED', 'Failed'),
-  opt('BROKE', 'Broke'),
+// Two independent verdicts: is it a level at all, and how much does it matter.
+export const LEVEL_CLASSIFICATION = [
+  opt('KEY_LEVEL', 'Key Level'),
+  opt('WATCH_OUT_AREA', 'Watch Out Area'),
 ];
 
-/** Which results count as the level having done its job. */
-export const HELD_RESULTS = ['HELD', 'RECLAIMED'];
+export const LEVEL_IMPORTANCE = [
+  opt('MAJOR', 'Major'),
+  opt('MINOR', 'Minor'),
+];
+
+/**
+ * Suggestions only. The source field is free text -- these just save typing
+ * and are never enforced.
+ */
+export const LEVEL_SOURCE_SUGGESTIONS = [
+  '4H Previous Candle Low',
+  '4H Previous Candle High',
+  '1H High',
+  '1H Low',
+  'Previous Day High',
+  'Previous Day Low',
+  'Range High',
+  'Range Low',
+  'Trendline',
+];
 
 // ------------------------------------------------------------ screenshots ---
 export const SCREENSHOT_CATEGORY = [
+  opt('MAIN', 'Main Chart'),
+  opt('EVIDENCE', 'Evidence'),
   opt('BEFORE', 'Before'),
   opt('AFTER', 'After'),
   opt('ANNOTATED', 'Annotated'),
-  opt('MAIN', 'Main'),
-  opt('SETUP', 'Setup'),
-  opt('RESULT', 'Result'),
   opt('OTHER', 'Other'),
 ];
 
@@ -77,7 +94,7 @@ export const SCREENSHOT_ENTITY = [
   'SESSION',
   'DAY_PREDICTION',
   'DAY_REVIEW',
-  'LEVEL_EXAMPLE',
+  'CERTIFIED_LEVEL',
   'MARKET_EXAMPLE',
 ];
 

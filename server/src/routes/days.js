@@ -44,12 +44,12 @@ function bundle(sessionId) {
     review: review ? { ...review, screenshots: shots('DAY_REVIEW', review.id) } : null,
     screenshots: shots('SESSION', sessionId),
     // What this day produced. The whole point of studying it.
-    level_examples: all(
-      `SELECT e.*, f.name AS folder_name, f.slug AS folder_slug,
-        (SELECT filename FROM screenshot s WHERE s.entity_type = 'LEVEL_EXAMPLE'
-          AND s.entity_id = e.id ORDER BY s.sort_order LIMIT 1) AS thumb
-       FROM level_example e JOIN level_folder f ON f.id = e.folder_id
-       WHERE e.session_id = ? ORDER BY e.created_at DESC`,
+    levels: all(
+      `SELECT l.*,
+        (SELECT filename FROM screenshot s WHERE s.entity_type = 'CERTIFIED_LEVEL'
+          AND s.entity_id = l.id ORDER BY s.sort_order LIMIT 1) AS thumb
+       FROM certified_level l
+       WHERE l.session_id = ? ORDER BY l.created_at DESC`,
       [sessionId]
     ),
     market_examples: all(
@@ -79,7 +79,7 @@ router.get('/', (req, res) => {
       `SELECT s.*,
          p.expected_day_type, p.locked_at, p.bias,
          r.actual_day_type, r.completed_at,
-         (SELECT COUNT(*) FROM level_example e WHERE e.session_id = s.id)  AS level_count,
+         (SELECT COUNT(*) FROM certified_level e WHERE e.session_id = s.id) AS level_count,
          (SELECT COUNT(*) FROM market_example m WHERE m.session_id = s.id) AS example_count,
          (SELECT COUNT(*) FROM screenshot sc WHERE sc.session_id = s.id)   AS screenshot_count,
          (SELECT filename FROM screenshot sc WHERE sc.session_id = s.id

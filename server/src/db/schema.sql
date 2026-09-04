@@ -3,7 +3,7 @@
 --
 -- A filing cabinet for trading research. Four things live here:
 --   1. DAILY PREDICTION  - a historical day you predicted, locked, then reviewed
---   2. LEVEL LIBRARY     - folders of level types, each holding many examples
+--   2. LEVEL LIBRARY     - certified price levels: what to trust and how to trade it
 --   3. MARKET EXAMPLES   - a visual textbook of ranges, trends, candles, structure
 --   4. BACKTEST ARCHIVE  - every day studied, and what came out of it
 --
@@ -73,43 +73,57 @@ CREATE TABLE IF NOT EXISTS day_review (
 );
 
 -- ---------------------------------------------------------------------------
--- LEVEL LIBRARY
--- A folder is one level type you research. It holds every example you file.
+-- LEVEL LIBRARY  --  the certified level database
+--
+-- One row per PRICE LEVEL you have backtested and decided to trust (or not).
+-- This is a certification record, not a filing cabinet: after doing the
+-- research elsewhere, you write down the verdict here.
+--
+-- Every number is in POINTS. There is no money anywhere in this application.
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS level_folder (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  slug        TEXT NOT NULL UNIQUE,
-  description TEXT,
-  sort_order  INTEGER NOT NULL DEFAULT 0,
-  archived    INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
-);
+CREATE TABLE IF NOT EXISTS certified_level (
+  id               TEXT PRIMARY KEY,
 
-CREATE TABLE IF NOT EXISTS level_example (
-  id            TEXT PRIMARY KEY,
-  folder_id     TEXT NOT NULL REFERENCES level_folder(id) ON DELETE CASCADE,
-  -- Optional: which studied day this came out of.
-  session_id    TEXT REFERENCES trading_session(id) ON DELETE SET NULL,
+  -- What the level is.
+  level_price      REAL NOT NULL,
+  instrument       TEXT,
+  source           TEXT,      -- free text: "4H Previous Candle Low", anything you like
+  timeframe        TEXT,      -- free text: 1m|5m|15m|30m|1h|4h|1D or your own
+  period_tested    TEXT,      -- optional, e.g. "Jan-Mar 2026"
 
-  occurred_on   TEXT,      -- YYYY-MM-DD
-  instrument    TEXT,
-  timeframe     TEXT,      -- 1m|5m|15m|30m|1h|4h|1D - filtered on constantly
-  level_price   REAL,
-  direction     TEXT,      -- LONG|SHORT|EITHER
-  touch_number  INTEGER,
-  drawdown      REAL,      -- penetration through the level, in points
-  reaction      REAL,      -- move away from the level, in points
-  result        TEXT,      -- HELD|FAILED|RECLAIMED|BROKE
-  what_happened TEXT,
-  notes         TEXT,
-  created_at    TEXT NOT NULL,
-  updated_at    TEXT NOT NULL
+  -- How it trades. BUY | SELL | BOTH
+  direction        TEXT NOT NULL DEFAULT 'BOTH',
+
+  -- First touch is treated separately because it behaves differently.
+  first_touch_pct  REAL,      -- 0-100, entered by hand after backtesting
+  first_touch_note TEXT,
+
+  -- Points of room needed, and points typically returned. Buy side.
+  buy_avg_stop     REAL,
+  buy_avg_profit   REAL,
+  buy_best_profit  REAL,
+
+  -- Sell side.
+  sell_avg_stop    REAL,
+  sell_avg_profit  REAL,
+  sell_best_profit REAL,
+
+  -- Two independent verdicts.
+  classification   TEXT,      -- KEY_LEVEL | WATCH_OUT_AREA
+  importance       TEXT,      -- MAJOR | MINOR
+
+  sample_size      INTEGER,   -- how many occurrences you tested before certifying
+  notes            TEXT,
+
+  -- Optional: the studied day this came out of.
+  session_id       TEXT REFERENCES trading_session(id) ON DELETE SET NULL,
+
+  created_at       TEXT NOT NULL,
+  updated_at       TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS ix_lex_folder ON level_example(folder_id, occurred_on DESC);
-CREATE INDEX IF NOT EXISTS ix_lex_timeframe ON level_example(timeframe);
-CREATE INDEX IF NOT EXISTS ix_lex_session ON level_example(session_id);
+CREATE INDEX IF NOT EXISTS ix_level_price ON certified_level(level_price);
+CREATE INDEX IF NOT EXISTS ix_level_class ON certified_level(classification, importance);
+CREATE INDEX IF NOT EXISTS ix_level_session ON certified_level(session_id);
 
 -- ---------------------------------------------------------------------------
 -- MARKET EXAMPLES
@@ -152,7 +166,7 @@ CREATE INDEX IF NOT EXISTS ix_mex_session ON market_example(session_id);
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS screenshot (
   id            TEXT PRIMARY KEY,
-  entity_type   TEXT NOT NULL,  -- SESSION|DAY_PREDICTION|DAY_REVIEW|LEVEL_EXAMPLE|MARKET_EXAMPLE
+  entity_type   TEXT NOT NULL,  -- SESSION|DAY_PREDICTION|DAY_REVIEW|CERTIFIED_LEVEL|MARKET_EXAMPLE
   entity_id     TEXT,
   session_id    TEXT REFERENCES trading_session(id) ON DELETE CASCADE,
   category      TEXT,           -- BEFORE|AFTER|ANNOTATED|MAIN|SETUP|RESULT|OTHER
@@ -177,7 +191,7 @@ CREATE TABLE IF NOT EXISTS tag (
 );
 CREATE TABLE IF NOT EXISTS entity_tag (
   tag_id      TEXT NOT NULL REFERENCES tag(id) ON DELETE CASCADE,
-  entity_type TEXT NOT NULL,  -- LEVEL_EXAMPLE | MARKET_EXAMPLE | SESSION
+  entity_type TEXT NOT NULL,  -- CERTIFIED_LEVEL | MARKET_EXAMPLE | SESSION
   entity_id   TEXT NOT NULL,
   PRIMARY KEY (tag_id, entity_type, entity_id)
 );

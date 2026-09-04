@@ -1,261 +1,158 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Router } from 'express';
-import { all, get, insert, newId, nowIso, run, update } from '../db/index.js';
-import { describe, round } from '../lib/stats.js';
-import { HELD_RESULTS } from '../../../shared/domain.js';
+import { UPLOAD_DIR, all, get, insert, newId, nowIso, run, update } from '../db/index.js';
 
 const router = Router();
 
 /**
- * The Level Library: folders of level types, each holding every example you
- * have filed for it.
+ * The certified level database.
  *
- * The summary at the top of a folder is deliberately plain -- counts, averages,
- * medians and a per-touch breakdown. The examples and their screenshots are the
- * substance; these numbers are just the label on the drawer.
+ * One row per price level you have backtested and reached a verdict on. There
+ * is no aggregation engine here on purpose: you do the research, you decide the
+ * numbers, this stores the verdict and the charts that back it up.
  */
 
-const FOLDER_FIELDS = ['name', 'description', 'sort_order', 'archived'];
-
-const EXAMPLE_FIELDS = [
-  'folder_id', 'session_id', 'occurred_on', 'instrument', 'timeframe', 'level_price',
-  'direction', 'touch_number', 'drawdown', 'reaction', 'result', 'what_happened', 'notes',
+const FIELDS = [
+  'level_price', 'instrument', 'source', 'timeframe', 'period_tested', 'direction',
+  'first_touch_pct', 'first_touch_note',
+  'buy_avg_stop', 'buy_avg_profit', 'buy_best_profit',
+  'sell_avg_stop', 'sell_avg_profit', 'sell_best_profit',
+  'classification', 'importance', 'sample_size', 'notes', 'session_id',
 ];
-
-const slugify = (s) =>
-  String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 
 const shotsFor = (id) =>
   all(
-    "SELECT * FROM screenshot WHERE entity_type = 'LEVEL_EXAMPLE' AND entity_id = ? ORDER BY sort_order, created_at",
+    "SELECT * FROM screenshot WHERE entity_type = 'CERTIFIED_LEVEL' AND entity_id = ? ORDER BY sort_order, created_at",
     [id]
   );
 
-const tagsFor = (id) =>
-  all(
-    `SELECT t.name FROM tag t JOIN entity_tag et ON et.tag_id = t.id
-     WHERE et.entity_type = 'LEVEL_EXAMPLE' AND et.entity_id = ? ORDER BY t.name`,
-    [id]
-  ).map((r) => r.name);
+const hydrate = (level) => ({
+  ...level,
+  screenshots: shotsFor(level.id),
+  session: level.session_id
+    ? get('SELECT id, date, instrument FROM trading_session WHERE id = ?', [level.session_id])
+    : null,
+});
 
-/** Attach tags by name, creating any that are new. */
-function setTags(entityType, entityId, names) {
-  if (!Array.isArray(names)) return;
-  run('DELETE FROM entity_tag WHERE entity_type = ? AND entity_id = ?', [entityType, entityId]);
-  const ts = nowIso();
-  for (const raw of names) {
-    const name = String(raw).trim();
-    if (!name) continue;
-    let tag = get('SELECT id FROM tag WHERE name = ?', [name]);
-    if (!tag) {
-      const id = newId('tag');
-      insert('tag', { id, name, created_at: ts });
-      tag = { id };
-    }
-    run(
-      'INSERT INTO entity_tag (tag_id, entity_type, entity_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING',
-      [tag.id, entityType, entityId]
-    );
+const numOrNull = (v) => {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Only keep fields that belong, and coerce the numeric ones once. */
+function clean(body) {
+  const out = {};
+  for (const f of FIELDS) {
+    if (body[f] === undefined) continue;
+    if (f === 'sample_size') out[f] = numOrNull(body[f]);
+    else if (f.endsWith('_pct') || f.includes('_avg_') || f.includes('_best_') || f === 'level_price') {
+      out[f] = numOrNull(body[f]);
+    } else out[f] = body[f] === '' ? null : body[f];
   }
+  return out;
 }
 
-/**
- * Folder statistics. Counts, means, medians, and how each touch number fared.
- * Nothing weighted, nothing scored -- just what the examples say.
- */
-function summarise(examples) {
-  const withResult = examples.filter((e) => e.result);
-  const held = withResult.filter((e) => HELD_RESULTS.includes(e.result)).length;
+// ----------------------------------------------------------------- listing --
+router.get('/levels', (req, res) => {
+  const { search, instrument, direction, classification, importance, timeframe } = req.query;
+  const where = [];
+  const params = [];
 
-  const bucket = (rows) => {
-    const r = rows.filter((e) => e.result);
-    const h = r.filter((e) => HELD_RESULTS.includes(e.result)).length;
-    return {
-      total: rows.length,
-      with_result: r.length,
-      held: h,
-      failed: r.length - h,
-      held_pct: r.length ? round((h / r.length) * 100, 0) : null,
-      avg_drawdown: round(describe(rows.map((e) => e.drawdown)).mean, 2),
-      median_drawdown: round(describe(rows.map((e) => e.drawdown)).median, 2),
-      avg_reaction: round(describe(rows.map((e) => e.reaction)).mean, 2),
-      median_reaction: round(describe(rows.map((e) => e.reaction)).median, 2),
-    };
-  };
+  if (instrument) { where.push('instrument = ?'); params.push(instrument); }
+  if (direction) {
+    // Asking for BUY should also surface levels that work both ways.
+    if (direction === 'BOTH') { where.push('direction = ?'); params.push('BOTH'); }
+    else { where.push("(direction = ? OR direction = 'BOTH')"); params.push(direction); }
+  }
+  if (classification) { where.push('classification = ?'); params.push(classification); }
+  if (importance) { where.push('importance = ?'); params.push(importance); }
+  if (timeframe) { where.push('timeframe = ?'); params.push(timeframe); }
+  if (search) {
+    const q = `%${search}%`;
+    where.push('(CAST(level_price AS TEXT) LIKE ? OR source LIKE ? OR instrument LIKE ? OR notes LIKE ?)');
+    params.push(q, q, q, q);
+  }
 
-  return {
-    ...bucket(examples),
-    by_touch: [1, 2, 3].map((n) => ({
-      touch: String(n),
-      ...bucket(examples.filter((e) => e.touch_number === n)),
-    })).concat([{
-      touch: '4+',
-      ...bucket(examples.filter((e) => (e.touch_number ?? 0) >= 4)),
-    }]),
-    by_timeframe: [...new Set(examples.map((e) => e.timeframe).filter(Boolean))]
-      .map((tf) => ({ timeframe: tf, ...bucket(examples.filter((e) => e.timeframe === tf)) }))
-      .sort((a, b) => b.total - a.total),
-  };
-}
-
-// ---------------------------------------------------------------- folders --
-router.get('/folders', (req, res) => {
   res.json(
     all(
-      `SELECT f.*,
-         (SELECT COUNT(*) FROM level_example e WHERE e.folder_id = f.id) AS example_count,
-         (SELECT filename FROM screenshot s
-           JOIN level_example e2 ON e2.id = s.entity_id
-          WHERE s.entity_type = 'LEVEL_EXAMPLE' AND e2.folder_id = f.id
-          ORDER BY s.created_at DESC LIMIT 1) AS thumb
-       FROM level_folder f
-       ${req.query.archived === '1' ? '' : 'WHERE f.archived = 0'}
-       ORDER BY f.sort_order, f.name`
+      `SELECT l.*,
+        (SELECT filename FROM screenshot s WHERE s.entity_type = 'CERTIFIED_LEVEL'
+          AND s.entity_id = l.id ORDER BY s.sort_order LIMIT 1) AS thumb,
+        (SELECT COUNT(*) FROM screenshot s WHERE s.entity_type = 'CERTIFIED_LEVEL'
+          AND s.entity_id = l.id) AS chart_count
+       FROM certified_level l
+       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY
+         CASE l.classification WHEN 'KEY_LEVEL' THEN 0 ELSE 1 END,
+         CASE l.importance WHEN 'MAJOR' THEN 0 ELSE 1 END,
+         l.created_at DESC`,
+      params
     )
   );
 });
 
-router.post('/folders', (req, res) => {
+/** Sources already in use, so the free-text field can autocomplete. */
+router.get('/sources', (req, res) => {
+  res.json(
+    all(
+      `SELECT source AS value, COUNT(*) AS n FROM certified_level
+       WHERE source IS NOT NULL AND source != '' GROUP BY source ORDER BY n DESC, source`
+    )
+  );
+});
+
+router.get('/levels/:id', (req, res) => {
+  const level = get('SELECT * FROM certified_level WHERE id = ?', [req.params.id]);
+  if (!level) return res.status(404).json({ error: 'Level not found' });
+  res.json(hydrate(level));
+});
+
+router.post('/levels', (req, res) => {
   const b = req.body ?? {};
-  if (!b.name?.trim()) return res.status(400).json({ error: 'name is required' });
-  const slug = slugify(b.name);
-  if (!slug) return res.status(400).json({ error: 'name must contain letters or numbers' });
-  if (get('SELECT id FROM level_folder WHERE slug = ?', [slug])) {
-    return res.status(409).json({ error: `A folder called "${b.name}" already exists.` });
-  }
+  const price = numOrNull(b.level_price);
+  if (price === null) return res.status(400).json({ error: 'A level price is required.' });
+
   const ts = nowIso();
-  const id = newId('lf');
-  const next = (get('SELECT COALESCE(MAX(sort_order), -1) AS n FROM level_folder')?.n ?? -1) + 1;
-  insert('level_folder', {
+  const id = newId('lvl');
+  insert('certified_level', {
+    ...clean(b),
     id,
-    name: b.name.trim(),
-    slug,
-    description: b.description ?? null,
-    sort_order: b.sort_order ?? next,
-    archived: 0,
+    level_price: price,
+    direction: b.direction ?? 'BOTH',
     created_at: ts,
     updated_at: ts,
   });
-  res.status(201).json(get('SELECT * FROM level_folder WHERE id = ?', [id]));
+  res.status(201).json(hydrate(get('SELECT * FROM certified_level WHERE id = ?', [id])));
 });
 
-router.patch('/folders/:id', (req, res) => {
-  const folder = get('SELECT * FROM level_folder WHERE id = ?', [req.params.id]);
-  if (!folder) return res.status(404).json({ error: 'Folder not found' });
-  const body = { ...req.body, updated_at: nowIso() };
-  if (body.name) body.slug = slugify(body.name);
-  update('level_folder', req.params.id, body, [...FOLDER_FIELDS, 'slug', 'updated_at']);
-  res.json(get('SELECT * FROM level_folder WHERE id = ?', [req.params.id]));
-});
-
-router.delete('/folders/:id', (req, res) => {
-  const n = get('SELECT COUNT(*) AS n FROM level_example WHERE folder_id = ?', [req.params.id])?.n ?? 0;
-  if (n > 0 && req.query.force !== '1') {
-    return res.status(409).json({
-      error: `This folder holds ${n} example${n === 1 ? '' : 's'}. Deleting it would delete them too.`,
-      example_count: n,
-    });
+router.patch('/levels/:id', (req, res) => {
+  if (!get('SELECT id FROM certified_level WHERE id = ?', [req.params.id])) {
+    return res.status(404).json({ error: 'Level not found' });
   }
-  run('DELETE FROM level_folder WHERE id = ?', [req.params.id]);
-  res.json({ ok: true });
-});
-
-/** One folder with its examples, filtered by timeframe / result / search. */
-router.get('/folders/:slug', (req, res) => {
-  const folder = get('SELECT * FROM level_folder WHERE slug = ? OR id = ?', [
-    req.params.slug, req.params.slug,
+  if (req.body.level_price !== undefined && numOrNull(req.body.level_price) === null) {
+    return res.status(400).json({ error: 'A level price is required.' });
+  }
+  update('certified_level', req.params.id, { ...clean(req.body), updated_at: nowIso() }, [
+    ...FIELDS, 'updated_at',
   ]);
-  if (!folder) return res.status(404).json({ error: 'Folder not found' });
-
-  const where = ['e.folder_id = ?'];
-  const params = [folder.id];
-  if (req.query.timeframe) { where.push('e.timeframe = ?'); params.push(req.query.timeframe); }
-  if (req.query.result) { where.push('e.result = ?'); params.push(req.query.result); }
-  if (req.query.instrument) { where.push('e.instrument = ?'); params.push(req.query.instrument); }
-  if (req.query.touch) {
-    if (String(req.query.touch).endsWith('+')) {
-      where.push('e.touch_number >= ?');
-      params.push(Number(String(req.query.touch).replace('+', '')));
-    } else {
-      where.push('e.touch_number = ?');
-      params.push(Number(req.query.touch));
-    }
-  }
-  if (req.query.search) {
-    where.push('(e.what_happened LIKE ? OR e.notes LIKE ? OR CAST(e.level_price AS TEXT) LIKE ?)');
-    const q = `%${req.query.search}%`;
-    params.push(q, q, q);
-  }
-
-  const examples = all(
-    `SELECT e.*, s.date AS session_date
-     FROM level_example e
-     LEFT JOIN trading_session s ON s.id = e.session_id
-     WHERE ${where.join(' AND ')}
-     ORDER BY e.occurred_on DESC, e.created_at DESC`,
-    params
-  ).map((e) => ({ ...e, screenshots: shotsFor(e.id), tags: tagsFor(e.id) }));
-
-  // The summary always describes the whole folder, so filtering the gallery
-  // never silently changes the numbers you are comparing against.
-  const allExamples = all('SELECT * FROM level_example WHERE folder_id = ?', [folder.id]);
-
-  res.json({
-    folder,
-    examples,
-    filtered_count: examples.length,
-    summary: summarise(allExamples),
-    timeframes: [...new Set(allExamples.map((e) => e.timeframe).filter(Boolean))],
-    instruments: [...new Set(allExamples.map((e) => e.instrument).filter(Boolean))],
-  });
+  res.json(hydrate(get('SELECT * FROM certified_level WHERE id = ?', [req.params.id])));
 });
 
-// --------------------------------------------------------------- examples --
-router.get('/examples/:id', (req, res) => {
-  const e = get(
-    `SELECT e.*, f.name AS folder_name, f.slug AS folder_slug, s.date AS session_date
-     FROM level_example e
-     JOIN level_folder f ON f.id = e.folder_id
-     LEFT JOIN trading_session s ON s.id = e.session_id
-     WHERE e.id = ?`,
+router.delete('/levels/:id', (req, res) => {
+  // Take the charts with it -- rows first, then the files, so a missing file on
+  // disk can never leave a dangling row behind.
+  const shots = all(
+    "SELECT filename FROM screenshot WHERE entity_type = 'CERTIFIED_LEVEL' AND entity_id = ?",
     [req.params.id]
   );
-  if (!e) return res.status(404).json({ error: 'Example not found' });
-  res.json({ ...e, screenshots: shotsFor(e.id), tags: tagsFor(e.id) });
-});
-
-router.post('/examples', (req, res) => {
-  const b = req.body ?? {};
-  if (!b.folder_id) return res.status(400).json({ error: 'folder_id is required' });
-  if (!get('SELECT id FROM level_folder WHERE id = ?', [b.folder_id])) {
-    return res.status(404).json({ error: 'Folder not found' });
+  run("DELETE FROM screenshot WHERE entity_type = 'CERTIFIED_LEVEL' AND entity_id = ?", [req.params.id]);
+  run("DELETE FROM entity_tag WHERE entity_type = 'CERTIFIED_LEVEL' AND entity_id = ?", [req.params.id]);
+  run('DELETE FROM certified_level WHERE id = ?', [req.params.id]);
+  for (const s of shots) {
+    try { fs.unlinkSync(path.join(UPLOAD_DIR, s.filename)); } catch { /* already gone */ }
   }
-  const ts = nowIso();
-  const id = newId('lex');
-  const data = { id, created_at: ts, updated_at: ts };
-  for (const f of EXAMPLE_FIELDS) if (b[f] !== undefined) data[f] = b[f] === '' ? null : b[f];
-  data.id = id;
-  data.folder_id = b.folder_id;
-  data.created_at = ts;
-  data.updated_at = ts;
-  insert('level_example', data);
-  setTags('LEVEL_EXAMPLE', id, b.tags);
-  res.status(201).json({ ...get('SELECT * FROM level_example WHERE id = ?', [id]), screenshots: [], tags: tagsFor(id) });
-});
-
-router.patch('/examples/:id', (req, res) => {
-  if (!get('SELECT id FROM level_example WHERE id = ?', [req.params.id])) {
-    return res.status(404).json({ error: 'Example not found' });
-  }
-  update('level_example', req.params.id, { ...req.body, updated_at: nowIso() }, [
-    ...EXAMPLE_FIELDS, 'updated_at',
-  ]);
-  if (req.body.tags !== undefined) setTags('LEVEL_EXAMPLE', req.params.id, req.body.tags);
-  const e = get('SELECT * FROM level_example WHERE id = ?', [req.params.id]);
-  res.json({ ...e, screenshots: shotsFor(e.id), tags: tagsFor(e.id) });
-});
-
-router.delete('/examples/:id', (req, res) => {
-  run('DELETE FROM level_example WHERE id = ?', [req.params.id]);
   res.json({ ok: true });
 });
 

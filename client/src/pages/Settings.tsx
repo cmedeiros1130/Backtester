@@ -65,8 +65,8 @@ export default function Settings() {
               <div className="grid grid-cols-2 gap-2.5">
                 {[
                   ['Days studied', counts.days, CalendarCheck],
-                  ['Level folders', counts.folders, FolderOpen],
-                  ['Level examples', counts.level_examples, FolderOpen],
+                  ['Certified levels', counts.levels, FolderOpen],
+                  ['Key levels', counts.key_levels, FolderOpen],
                   ['Categories', counts.categories, Images],
                   ['Market examples', counts.market_examples, Images],
                   ['Charts stored', counts.screenshots, ImageIcon],
@@ -93,7 +93,7 @@ export default function Settings() {
                 {health?.data_dir ?? '—'}
               </code>
               <p className="mt-1.5 text-[10.5px] leading-relaxed text-fg-faint">
-                Holds <code>levelforge.db</code> — every folder, example, prediction and review — and{' '}
+                Holds <code>levelforge.db</code> — every certified level, example, prediction and review — and{' '}
                 <code>uploads/</code>, which holds every chart you have saved. Back up that one folder
                 and you have backed up the whole cabinet.
               </p>

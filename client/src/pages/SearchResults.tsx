@@ -4,13 +4,10 @@ import { SearchX, ArrowRight } from 'lucide-react';
 import { Page, PageHeader } from '@/components/Layout';
 import { Badge, EmptyState, LoadingPane, SectionLabel } from '@/components/ui';
 import { ChartThumb } from '@/components/Charts';
+import { LevelCard } from '@/components/LevelCard';
 import { useFetch } from '@/lib/store';
 import { DASH, longDate, pts, shortDate } from '@/lib/format';
-import { DAY_TYPE, LEVEL_RESULT, SESSION_STATUS, labelOf } from '@shared/domain.js';
-
-const RESULT_TONE: Record<string, any> = {
-  HELD: 'good', RECLAIMED: 'good', FAILED: 'bad', BROKE: 'bad',
-};
+import { DAY_TYPE, SESSION_STATUS, labelOf } from '@shared/domain.js';
 
 /**
  * One result page across the whole cabinet: levels, examples and days together.
@@ -36,35 +33,17 @@ export default function SearchResults() {
             <EmptyState
               icon={<SearchX size={26} />}
               title="Nothing found"
-              hint="Search matches level prices, folder names, example titles, the notes you wrote and any tags you attached."
+              hint="Search matches level prices, sources, example titles, the notes you wrote and any tags you attached."
             />
           </div>
         ) : (
           <>
-            {data.level_examples.length > 0 && (
+            {data.levels.length > 0 && (
               <section>
-                <SectionLabel>Level examples ({data.level_examples.length})</SectionLabel>
+                <SectionLabel>Certified levels ({data.levels.length})</SectionLabel>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {data.level_examples.map((e: any) => (
-                    <button
-                      key={e.id}
-                      onClick={() => navigate(`/library/${e.folder_slug}?open=${e.id}`)}
-                      className="group text-left"
-                    >
-                      <ChartThumb
-                        filename={e.thumb}
-                        badge={e.result ? <Badge tone={RESULT_TONE[e.result] ?? 'muted'}>{labelOf(LEVEL_RESULT, e.result)}</Badge> : undefined}
-                      />
-                      <div className="mt-1.5 truncate text-[12px] font-medium text-fg group-hover:text-accent">
-                        {e.folder_name}
-                      </div>
-                      <div className="tnum flex flex-wrap gap-x-2 text-[10.5px] text-fg-faint">
-                        {e.level_price != null && <span>{pts(e.level_price)}</span>}
-                        <span>{e.timeframe}</span>
-                        {e.touch_number != null && <span>touch {e.touch_number}</span>}
-                        {e.occurred_on && <span>{shortDate(e.occurred_on)}</span>}
-                      </div>
-                    </button>
+                  {data.levels.map((l: any) => (
+                    <LevelCard key={l.id} level={l} onClick={() => navigate(`/library/${l.id}`)} />
                   ))}
                 </div>
               </section>

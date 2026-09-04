@@ -10,12 +10,13 @@ import {
   Modal, Prose, SectionLabel, Select, Textarea, useToast,
 } from '@/components/ui';
 import { ChartThumb, Screenshots } from '@/components/Charts';
-import { LevelExampleForm } from '@/components/LevelExampleForm';
+import { CertifyLevelForm } from '@/components/CertifyLevelForm';
+import { LevelCard } from '@/components/LevelCard';
 import { MarketExampleForm } from '@/components/MarketExampleForm';
 import { useFetch } from '@/lib/store';
 import { api } from '@/lib/api';
 import { DASH, longDate, pts } from '@/lib/format';
-import { BIAS, DAY_TYPE, LEVEL_RESULT, SESSION_STATUS, labelOf } from '@shared/domain.js';
+import { BIAS, DAY_TYPE, SESSION_STATUS, labelOf } from '@shared/domain.js';
 
 const PREDICTION_FIELDS: { key: string; label: string; rows?: number; placeholder?: string }[] = [
   { key: 'important_levels', label: 'Important levels', rows: 2, placeholder: '21450 / 21520' },
@@ -33,10 +34,6 @@ const REVIEW_FIELDS: { key: string; label: string; rows?: number }[] = [
   { key: 'missed', label: 'What did I miss?', rows: 3 },
   { key: 'learned', label: 'What did I learn?', rows: 3 },
 ];
-
-const RESULT_TONE: Record<string, any> = {
-  HELD: 'good', RECLAIMED: 'good', FAILED: 'bad', BROKE: 'bad',
-};
 
 /** Read-only rendering of a locked field, so a locked page still reads well. */
 function Locked({ value }: { value: any }) {
@@ -140,7 +137,7 @@ export default function Day() {
         actions={
           <>
             <Button size="sm" icon={<FolderPlus size={13} />} onClick={() => setLevelOpen(true)}>
-              Save to Level Library
+              Certify a Level
             </Button>
             <Button size="sm" icon={<ImagePlus size={13} />} onClick={() => setExampleOpen(true)}>
               Save to Market Examples
@@ -291,29 +288,17 @@ export default function Day() {
         {/* ---------------------------------------- what this day produced -- */}
         <div className="grid gap-4 lg:grid-cols-2">
           <Card
-            title={`Level examples filed (${data.level_examples.length})`}
-            subtitle="Levels you tested on this day."
+            title={`Levels certified (${data.levels.length})`}
+            subtitle="Levels you certified from this day."
             actions={<Button size="xs" icon={<FolderPlus size={11} />} onClick={() => setLevelOpen(true)}>Add</Button>}
           >
-            {data.level_examples.length === 0 ? (
-              <EmptyState title="Nothing filed from this day yet"
-                hint="Tested a level? File it into the Level Library and it stays linked to this day." />
+            {data.levels.length === 0 ? (
+              <EmptyState title="No levels certified from this day yet"
+                hint="Backtested a level here? Certify it and it stays linked to this day." />
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {data.level_examples.map((e: any) => (
-                  <button key={e.id} onClick={() => navigate(`/library/${e.folder_slug}?open=${e.id}`)}
-                    className="group text-left">
-                    <ChartThumb filename={e.thumb} ratio="aspect-[16/9]"
-                      badge={e.result ? <Badge tone={RESULT_TONE[e.result] ?? 'muted'}>{labelOf(LEVEL_RESULT, e.result)}</Badge> : undefined} />
-                    <div className="mt-1.5 truncate text-[12px] font-medium text-fg group-hover:text-accent">
-                      {e.folder_name}
-                    </div>
-                    <div className="tnum flex gap-2 text-[10.5px] text-fg-faint">
-                      {e.level_price != null && <span>{pts(e.level_price)}</span>}
-                      <span>{e.timeframe}</span>
-                      {e.touch_number != null && <span>touch {e.touch_number}</span>}
-                    </div>
-                  </button>
+                {data.levels.map((l: any) => (
+                  <LevelCard key={l.id} level={l} onClick={() => navigate(`/library/${l.id}`)} />
                 ))}
               </div>
             )}
@@ -384,11 +369,11 @@ export default function Day() {
         </div>
       </Modal>
 
-      <LevelExampleForm
+      <CertifyLevelForm
         open={levelOpen}
         onClose={() => setLevelOpen(false)}
         sessionId={session.id}
-        defaults={{ occurred_on: session.date, instrument: session.instrument, timeframe: session.timeframe }}
+        defaults={{ instrument: session.instrument, timeframe: session.timeframe }}
         onSaved={reload}
       />
       <MarketExampleForm

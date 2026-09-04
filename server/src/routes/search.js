@@ -6,40 +6,29 @@ const router = Router();
 /**
  * One search box across the whole cabinet.
  *
- * Matches level examples, market examples and studied days. A bare number like
- * "503" finds level prices; words like "reclaim", "range" or "third touch"
- * match the text you wrote and the tags you attached.
+ * Matches certified levels, market examples and studied days. A bare number
+ * like "503" finds level prices; words like "range" or "key" match the text
+ * you wrote and the classifications you assigned.
  */
 router.get('/', (req, res) => {
   const q = String(req.query.q ?? '').trim();
-  if (!q) return res.json({ query: '', level_examples: [], market_examples: [], days: [], total: 0 });
+  if (!q) return res.json({ query: '', levels: [], market_examples: [], days: [], total: 0 });
 
   const like = `%${q}%`;
-  // "third touch" should still find touch_number = 3.
-  const words = q.toLowerCase().split(/\s+/);
-  const ordinal = { first: 1, '1st': 1, second: 2, '2nd': 2, third: 3, '3rd': 3, fourth: 4, '4th': 4 };
-  const touchNumber = words.some((w) => w.startsWith('touch'))
-    ? (words.map((w) => ordinal[w]).find(Boolean) ?? null)
-    : null;
   const limit = Number(req.query.limit ?? 40);
 
-  const levelExamples = all(
-    `SELECT e.id, e.occurred_on, e.instrument, e.timeframe, e.level_price, e.result,
-            e.touch_number, e.drawdown, e.reaction, e.what_happened,
-            f.name AS folder_name, f.slug AS folder_slug,
-       (SELECT filename FROM screenshot s WHERE s.entity_type = 'LEVEL_EXAMPLE'
-         AND s.entity_id = e.id ORDER BY s.sort_order LIMIT 1) AS thumb
-     FROM level_example e
-     JOIN level_folder f ON f.id = e.folder_id
-     WHERE f.name LIKE ?
-        OR e.what_happened LIKE ? OR e.notes LIKE ?
-        OR e.instrument LIKE ? OR e.result LIKE ?
-        OR CAST(e.level_price AS TEXT) LIKE ?
-        OR (? IS NOT NULL AND e.touch_number = ?)
-        OR e.id IN (SELECT et.entity_id FROM entity_tag et JOIN tag t ON t.id = et.tag_id
-                    WHERE et.entity_type = 'LEVEL_EXAMPLE' AND t.name LIKE ?)
-     ORDER BY e.occurred_on DESC, e.created_at DESC LIMIT ?`,
-    [like, like, like, like, like, like, touchNumber, touchNumber, like, limit]
+  const levels = all(
+    `SELECT l.id, l.level_price, l.instrument, l.timeframe, l.source, l.direction,
+            l.classification, l.importance, l.first_touch_pct, l.sample_size, l.notes,
+       (SELECT filename FROM screenshot s WHERE s.entity_type = 'CERTIFIED_LEVEL'
+         AND s.entity_id = l.id ORDER BY s.sort_order LIMIT 1) AS thumb
+     FROM certified_level l
+     WHERE CAST(l.level_price AS TEXT) LIKE ?
+        OR l.source LIKE ? OR l.instrument LIKE ? OR l.notes LIKE ?
+        OR l.first_touch_note LIKE ? OR l.classification LIKE ? OR l.importance LIKE ?
+        OR l.direction LIKE ?
+     ORDER BY l.created_at DESC LIMIT ?`,
+    [like, like, like, like, like, like, like, like, limit]
   );
 
   const marketExamples = all(
@@ -76,10 +65,10 @@ router.get('/', (req, res) => {
 
   res.json({
     query: q,
-    level_examples: levelExamples,
+    levels,
     market_examples: marketExamples,
     days,
-    total: levelExamples.length + marketExamples.length + days.length,
+    total: levels.length + marketExamples.length + days.length,
   });
 });
 

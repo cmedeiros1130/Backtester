@@ -7,9 +7,10 @@ import {
 import { Page } from '@/components/Layout';
 import { Badge, LoadingPane } from '@/components/ui';
 import { ChartThumb } from '@/components/Charts';
+import { LevelCard } from '@/components/LevelCard';
 import { useFetch } from '@/lib/store';
 import { DASH, longDate, pts, shortDate } from '@/lib/format';
-import { DAY_TYPE, LEVEL_RESULT, labelOf } from '@shared/domain.js';
+import { DAY_TYPE, labelOf } from '@shared/domain.js';
 
 const SECTIONS = [
   {
@@ -24,9 +25,9 @@ const SECTIONS = [
     to: '/library',
     icon: FolderOpen,
     title: 'Level Library',
-    blurb: 'Store and compare every occurrence of your predictive trading levels.',
-    countKey: 'level_examples',
-    countLabel: 'level examples',
+    blurb: 'Certify the price levels you trust, and how much room and profit they give.',
+    countKey: 'levels',
+    countLabel: 'certified levels',
   },
   {
     to: '/examples',
@@ -45,10 +46,6 @@ const SECTIONS = [
     countLabel: 'days reviewed',
   },
 ];
-
-const RESULT_TONE: Record<string, any> = {
-  HELD: 'good', RECLAIMED: 'good', FAILED: 'bad', BROKE: 'bad',
-};
 
 function Row({ title, children, onMore }: { title: string; children: React.ReactNode; onMore?: () => void }) {
   return (
@@ -74,7 +71,7 @@ export default function Home() {
   if (!data) return null;
 
   const c = data.counts;
-  const empty = c.days === 0 && c.level_examples === 0 && c.market_examples === 0;
+  const empty = c.days === 0 && c.levels === 0 && c.market_examples === 0;
 
   return (
     <>
@@ -113,40 +110,18 @@ export default function Home() {
           <div className="panel px-6 py-10 text-center">
             <p className="text-[13px] font-medium text-fg-muted">The cabinet is empty</p>
             <p className="mx-auto mt-1.5 max-w-lg text-[12px] leading-relaxed text-fg-faint">
-              Start with a Daily Prediction, or go straight to the Level Library and file your first
-              example. Every drawer is already set up — Previous Day High, 4H Low, Range High and the
-              rest — and you can rename or add your own.
+              Start with a Daily Prediction, or go straight to the Level Library and certify your
+              first level. Everything here is yours to name — nothing is pre-filled.
             </p>
           </div>
         ) : (
           <>
-            {/* ------------------------------------- recent level examples -- */}
-            {data.recent_level_examples.length > 0 && (
-              <Row title="Recent level examples" onMore={() => navigate('/library')}>
+            {/* -------------------------------------- recent certified levels -- */}
+            {data.recent_levels.length > 0 && (
+              <Row title="Recently certified levels" onMore={() => navigate('/library')}>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {data.recent_level_examples.map((e: any) => (
-                    <button
-                      key={e.id}
-                      onClick={() => navigate(`/library/${e.folder_slug}?open=${e.id}`)}
-                      className="group text-left"
-                    >
-                      <ChartThumb
-                        filename={e.thumb}
-                        alt={e.folder_name}
-                        badge={e.result ? <Badge tone={RESULT_TONE[e.result] ?? 'muted'}>{labelOf(LEVEL_RESULT, e.result)}</Badge> : undefined}
-                      />
-                      <div className="mt-1.5">
-                        <div className="truncate text-[12px] font-medium text-fg group-hover:text-accent">
-                          {e.folder_name}
-                        </div>
-                        <div className="tnum mt-0.5 flex flex-wrap items-center gap-x-2 text-[10.5px] text-fg-faint">
-                          <span>{e.instrument}</span>
-                          <span>{e.timeframe}</span>
-                          {e.level_price != null && <span>{pts(e.level_price)}</span>}
-                          {e.touch_number != null && <span>touch {e.touch_number}</span>}
-                        </div>
-                      </div>
-                    </button>
+                  {data.recent_levels.map((l: any) => (
+                    <LevelCard key={l.id} level={l} onClick={() => navigate(`/library/${l.id}`)} />
                   ))}
                 </div>
               </Row>

@@ -336,6 +336,110 @@ step('unseed-level-folders', 'remove the pre-created Level Library folders', (db
   return n > 0;
 });
 
+step('certify-levels', 'level_folder + level_example -> certified_level', (db) => {
+  if (!tableExists(db, 'level_folder') && !tableExists(db, 'level_example')) return false;
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS certified_level (
+      id TEXT PRIMARY KEY, level_price REAL NOT NULL, instrument TEXT, source TEXT,
+      timeframe TEXT, period_tested TEXT, direction TEXT NOT NULL DEFAULT 'BOTH',
+      first_touch_pct REAL, first_touch_note TEXT,
+      buy_avg_stop REAL, buy_avg_profit REAL, buy_best_profit REAL,
+      sell_avg_stop REAL, sell_avg_profit REAL, sell_best_profit REAL,
+      classification TEXT, importance TEXT, sample_size INTEGER, notes TEXT,
+      session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  `);
+
+  const ts = nowIso();
+  const insert = db.prepare(
+    `INSERT INTO certified_level
+      (id, level_price, instrument, source, timeframe, direction, first_touch_pct,
+       buy_avg_stop, buy_avg_profit, sell_avg_stop, sell_avg_profit,
+       sample_size, notes, session_id, created_at, updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  );
+
+  const folders = tableExists(db, 'level_folder')
+    ? db.prepare('SELECT * FROM level_folder').all() : [];
+  let carried = 0;
+
+  for (const f of folders) {
+    const rows = tableExists(db, 'level_example')
+      ? db.prepare('SELECT * FROM level_example WHERE folder_id = ?').all(f.id) : [];
+
+    // A folder named like "4hr Level - 29529.66" already carries its price.
+    // Pull it out and keep the rest as the source description. "4hr" also
+    // contains a number, so score the candidates: a decimal point or simply
+    // more digits means it is the price rather than a timeframe.
+    const candidates = [...String(f.name ?? '').matchAll(/\d[\d,]*(?:\.\d+)?/g)];
+    const priceInName = candidates.length
+      ? candidates.reduce((best, m) => {
+          const score = (t) => (t.includes('.') ? 100 : 0) + t.replace(/\D/g, '').length;
+          return score(m[0]) > score(best[0]) ? m : best;
+        })
+      : null;
+    const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const avg = (vals) => {
+      const n = vals.filter((v) => typeof v === 'number' && Number.isFinite(v));
+      return n.length ? Math.round((n.reduce((a, b) => a + b, 0) / n.length) * 100) / 100 : null;
+    };
+
+    const price = num(rows.find((r) => num(r.level_price))?.level_price)
+      ?? (priceInName ? Number(priceInName[0].replace(/,/g, '')) : null);
+
+    // Without a price there is nothing to certify; skip rather than invent one.
+    if (price === null || !Number.isFinite(price)) continue;
+
+    const source = (priceInName
+      ? String(f.name).replace(priceInName[0], '').replace(/[-–—\s]+$/, '').trim()
+      : String(f.name ?? '').trim()) || null;
+
+    const dirs = new Set(rows.map((r) => r.direction).filter(Boolean));
+    const direction = dirs.has('LONG') && dirs.has('SHORT') ? 'BOTH'
+      : dirs.has('LONG') ? 'BUY'
+        : dirs.has('SHORT') ? 'SELL' : 'BOTH';
+
+    // Old per-touch measurements roll up into the new averages: drawdown was
+    // the room the level needed, reaction was what it gave back.
+    const longs = rows.filter((r) => r.direction === 'LONG');
+    const shorts = rows.filter((r) => r.direction === 'SHORT');
+    const firstTouches = rows.filter((r) => r.touch_number === 1 && r.result);
+    const held = firstTouches.filter((r) => ['HELD', 'RECLAIMED'].includes(r.result)).length;
+
+    insert.run(
+      newId('lvl'), price,
+      rows.find((r) => r.instrument)?.instrument ?? null,
+      source,
+      rows.find((r) => r.timeframe)?.timeframe ?? null,
+      direction,
+      firstTouches.length ? Math.round((held / firstTouches.length) * 100) : null,
+      avg(longs.map((r) => r.drawdown)), avg(longs.map((r) => r.reaction)),
+      avg(shorts.map((r) => r.drawdown)), avg(shorts.map((r) => r.reaction)),
+      rows.length || null,
+      [f.description, ...rows.map((r) => r.notes).filter(Boolean)].filter(Boolean).join('\n\n') || null,
+      rows.find((r) => r.session_id)?.session_id ?? null,
+      ts, ts
+    );
+    carried += 1;
+  }
+
+  // Evidence charts follow their level.
+  if (tableExists(db, 'screenshot')) {
+    db.exec("UPDATE screenshot SET entity_type = 'CERTIFIED_LEVEL' WHERE entity_type = 'LEVEL_EXAMPLE'");
+  }
+  if (tableExists(db, 'entity_tag')) {
+    db.exec("UPDATE entity_tag SET entity_type = 'CERTIFIED_LEVEL' WHERE entity_type = 'LEVEL_EXAMPLE'");
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('DROP TABLE IF EXISTS level_example');
+  db.exec('DROP TABLE IF EXISTS level_folder');
+  db.exec('PRAGMA foreign_keys = ON');
+
+  console.log(`[migrate] certified ${carried} level(s) from the old folder model`);
+  return true;
+});
+
 // ---------------------------------------------------------------------------
 /**
  * Runs BEFORE schema.sql, so renames happen while the new table name is still
